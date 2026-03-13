@@ -8,6 +8,8 @@ module control(
     input i_en,
     input i_start_fft,
     input i_start_graph,
+    input i_load,
+    input i_valid,
     output [9:0] o_even_addr,
     output [9:0] o_odd_addr,
     output [8:0] o_twi_addr,
@@ -18,22 +20,28 @@ module control(
     output o_wr_mem0,
     output o_wr_mem1,
     output o_busy,
-    output o_en_graph
+    output o_en_copy,
+    output [9:0] o_load_counter,
+    output o_en_load,
+    output [9:0] o_copy_counter
     );
 
     // state machine: CLK1
 
-    typedef enum logic [1:0] {
+    typedef enum logic [2:0] {
         IDLE,
+        LOAD,
         ACTIVE,
         STALL,
-        GRAPH
+        COPY
     } state_t;
 
     state_t state = IDLE;
     logic [3:0] stage_counter = '0;
     logic [8:0] pair_counter  = '0;
     logic [2:0] stall_counter = '0;
+    logic [9:0] load_counter = '0;
+    logic [9:0] copy_counter = '0;
 
     always_ff @(posedge i_clk) begin
         if (i_rst) begin
@@ -41,7 +49,8 @@ module control(
             stage_counter <= '0;
             pair_counter  <= '0;
             stall_counter <= '0;
-            
+            load_counter  <= '0;
+            copy_counter  <= '0;
         end
         else if (i_en) begin
             case (state)
@@ -52,16 +61,21 @@ module control(
                         stage_counter <= '0;
                         pair_counter  <= '0;
                     end
-                    else if (i_start_graph) begin
-                        state <= GRAPH;
+                    else if (i_load) begin // IDLE -> LOAD state transition
+                        state <= LOAD;
+                        load_counter <= '0;
                     end
                 end
 
-                GRAPH: begin
-                    if (i_start_fft) begin // GRAPH -> ACTIVE state transition
-                        state         <= ACTIVE;
+                LOAD: begin
+                    if (load_counter == 10'd1023) begin // LOAD -> ACTIVE state transition
+                        state <= ACTIVE;
+                        load_counter <= '0;
+                        pair_counter <= '0;
                         stage_counter <= '0;
-                        pair_counter  <= '0;
+                    end
+                    else if (i_valid) begin
+                        load_counter <= load_counter + 1;
                     end
                 end
 
@@ -77,17 +91,29 @@ module control(
 
                 STALL: begin
                     if (stall_counter == '0) begin
-                        if (stage_counter == 4'd9) begin // STALL -> IDLE state transition
-                            state         <= IDLE;
+                        if (stage_counter == 4'd9) begin // STALL -> COPY state transition
+                            state <= COPY;
+                            copy_counter <= '0;
+                            stage_counter <= '0;
                         end
                         else begin // STALL -> ACTIVE state transition
                             stage_counter <= stage_counter + 1;
-                            state         <= ACTIVE;
-                            pair_counter  <= 0;
+                            state <= ACTIVE;
+                            pair_counter <= 0;
                         end
                     end
                     else begin
                         stall_counter <= stall_counter - 1;
+                    end
+                end
+
+                COPY: begin
+                    if (copy_counter == 10'd1023) begin
+                        state <= LOAD;
+                        load_counter <= '0;
+                    end
+                    else begin
+                        copy_counter <= copy_counter + 1;
                     end
                 end
 
@@ -97,6 +123,10 @@ module control(
     end
 
     assign o_busy = (state != IDLE);
+
+    assign o_load_counter = load_counter;
+
+    assign o_copy_counter = copy_counter;
 
     // generate addresses: CLK2
     logic [9:0] even_addr;
@@ -129,7 +159,8 @@ module control(
             wr_mem1 <= 0;
         end
         else if (i_en) begin
-            if (state == ACTIVE) begin
+            case(state)
+            ACTIVE: begin
                 rd_mem0 <= !stage_counter[0];
                 rd_mem1 <= stage_counter[0];
                 wr_mem0 <= stage_counter[0];
@@ -152,10 +183,11 @@ module control(
                     btm_addr <= ((group_idx << (stage_counter + 1)) | within_group) | (10'd1 << stage_counter);
                 end
             end
-            else begin
+            default: begin
                 wr_mem0 <= 0;
                 wr_mem1 <= 0;
             end
+            endcase
         end
     end
 
@@ -169,6 +201,8 @@ module control(
     assign o_wr_mem0 = wr_mem0;
     assign o_wr_mem1 = wr_mem1;
 
-    assign o_en_graph = (state == GRAPH);
+    assign o_en_copy = (state == COPY);
+
+    assign o_en_load = (state == LOAD);
 
 endmodule

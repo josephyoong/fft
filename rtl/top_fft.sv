@@ -4,12 +4,15 @@
 
 module top_fft(
     input CLK100MHZ,
+    input M_DATA,
     output [3:0] VGA_R,
     output [3:0] VGA_G,
     output [3:0] VGA_B,
     output VGA_HS,
     output VGA_VS,
-    output led0
+    output led0,
+    output M_CLK,
+    output M_LRSEL
 );
 
 wire g0;
@@ -19,8 +22,8 @@ wire clk;
 logic [7:0] counter = '0;
 wire start_fft;
 wire start_graph;
+wire load;
 
-// 25.175 MHz clock
 clk_wiz_0 clk_wiz_0_inst (
   .clk_out1(vga_clk),
   .clk_out2(clk),
@@ -43,20 +46,27 @@ always_ff @(posedge vga_clk) begin
     end
 end
 
-assign start_fft = (counter == 8'd10);
+assign start_fft = 1'b0; //(counter == 8'd10); // cdc
 
-assign start_graph = (counter == 8'hFF);
+assign start_graph = 1'b0; //(counter == 8'hFF); // cdc
+
+assign load = (counter == 8'hFF);
 
 fft fft0 (
-    .i_clk(vga_clk),
+    .i_clk(clk),
+    .i_clk_25MHz(vga_clk),
     .i_rst(~locked),
     .i_en(1'b1),
     .i_start_fft(start_fft),
     .i_start_graph(start_graph),
+    .i_load(load),
+    .i_mic_data(M_DATA),
     .o_busy(led0),
     .o_hs(VGA_HS),
     .o_vs(VGA_VS),
-    .o_g0(g0)
+    .o_g0(g0),
+    .o_mic_clk(M_CLK),
+    .o_lrsel(M_LRSEL)
 );
 
 assign VGA_R = '0;
